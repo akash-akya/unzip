@@ -1,4 +1,28 @@
 defmodule Unzip do
+  @moduledoc """
+  Module to get files out of a zip. Works with local and remote files
+
+  ## Overview
+  Unzip tries to solve problem of accessing files from a zip which is not local (Aws S3, sftp etc). It does this by simply separating file system and zip implementation. Anything which implements `Unzip.FileAccess` can be used to get zip contents. Unzip relies on the ability to seek and read of the file, This is due to the nature of zip file.  Files from the zip are read on demand.
+
+  ## Usage
+
+      # Unzip.LocalFile implements Unzip.FileAccess
+      zip_file = Unzip.LocalFile.open("foo/bar.zip")
+
+      # `new` reads list of files by reading central directory found at the end of the zip
+      {:ok, unzip} = Unzip.new(zip_file)
+
+      # presents already read files metadata
+      file_entries = Unzip.list_entries(unzip)
+
+      # returns decompressed file stream
+      stream = Unzip.file_stream!(unzip, "baz.png")
+
+
+  Supports STORED and DEFLATE compression methods. Does not support zip64 specification yet
+
+  """
   require Logger
   alias Unzip.FileAccess
   use Bitwise, only_operators: true
@@ -12,6 +36,18 @@ defmodule Unzip do
   end
 
   defmodule Entry do
+    @moduledoc """
+    File metadata returned by `Unzip.list_entries/1`
+
+      * `:file_name` - (string) File name with complete path. Directory files will have `/` at the end of their name
+
+      * `:last_modified_datetime` - (NaiveDateTime) last modified date and time of the file
+
+      * `:compressed_size` - (positive integer) Compressed file size in bytes
+
+      * `:uncompressed_size` - (positive integer) Uncompressed file size in bytes
+
+    """
     defstruct [
       :file_name,
       :last_modified_datetime,
@@ -20,6 +56,9 @@ defmodule Unzip do
     ]
   end
 
+  @doc """
+  Creates Unzip struct by reading central directory found at the end of the zip (reads entries in the file)
+  """
   def new(zip) do
     with {:ok, eocd} <- find_eocd(zip),
          {:ok, entries} <- read_cd_entries(zip, eocd) do
@@ -27,6 +66,11 @@ defmodule Unzip do
     end
   end
 
+  @doc """
+  Returns list of files metadata. This does not make `pread` call as metadata is already by `new/1`.
+
+  See `Unzip.Entry` for metadata fields
+  """
   def list_entries(unzip) do
     Enum.map(unzip.cd_list, fn {_, entry} ->
       %Entry{
@@ -38,6 +82,9 @@ defmodule Unzip do
     end)
   end
 
+  @doc """
+  Returns decompressed file entry from the zip as a stream. `file_name` *must* be complete file path. File is read in the chunks of 65k
+  """
   def file_stream!(%Unzip{zip: zip, cd_list: cd_list}, file_name) do
     entry = Map.fetch!(cd_list, file_name)
     local_header = pread!(zip, entry.local_header_offset, 30)

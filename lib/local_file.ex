@@ -1,6 +1,11 @@
 defmodule Unzip.LocalFile do
+  @moduledoc """
+  Simple module to access local zip file and example for implementing `Unzip.FileAccess`.
+
+  Note: this is basic implementation, it is callers responsibility to handle resource properly
+  """
+
   defstruct [:path, :handle]
-  alias __MODULE__
 
   def open(path) do
     {:ok, file} = :file.open(path, [:read, :binary, :raw])
