@@ -21,8 +21,10 @@ defmodule Unzip do
   end
 
   def new(zip) do
-    eocd = find_eocd(zip)
-    {:ok, %Unzip{zip: zip, cd_list: read_cd_entries(zip, eocd)}}
+    with {:ok, eocd} <- find_eocd(zip),
+         {:ok, entries} <- read_cd_entries(zip, eocd) do
+      {:ok, %Unzip{zip: zip, cd_list: entries}}
+    end
   end
 
   def list_entries(unzip) do
@@ -38,7 +40,7 @@ defmodule Unzip do
 
   def file_stream!(%Unzip{zip: zip, cd_list: cd_list}, file_name) do
     entry = Map.fetch!(cd_list, file_name)
-    {:ok, local_header} = FileAccess.pread(zip, entry.local_header_offset, 30)
+    local_header = pread!(zip, entry.local_header_offset, 30)
 
     <<0x04034B50::little-32, _::little-32, compression_method::little-16, _::little-128,
       file_name_length::little-16, extra_field_length::little-16>> = local_header
@@ -62,7 +64,7 @@ defmodule Unzip do
 
         {z, offset} ->
           next_offset = min(offset + @chunk_size, end_offset)
-          {:ok, data} = FileAccess.pread(file, offset, next_offset - offset)
+          data = pread!(file, offset, next_offset - offset)
           {[:zlib.inflate(z, data)], {z, next_offset}}
       end,
       fn {z, _} ->
@@ -90,18 +92,19 @@ defmodule Unzip do
 
       {offset, crc} ->
         next_offset = min(offset + @chunk_size, end_offset)
-        {:ok, data} = FileAccess.pread(file, offset, next_offset - offset)
+        {:ok, data} = pread!(file, offset, next_offset - offset)
         crc = :erlang.crc32(crc, data)
         {data, {next_offset, crc}}
     end)
   end
 
   defp read_cd_entries(zip, eocd) do
-    {:ok, data} = FileAccess.pread(zip, eocd.cd_offset, eocd.cd_size)
-    parse_cd(data, %{})
+    with {:ok, data} <- pread(zip, eocd.cd_offset, eocd.cd_size) do
+      parse_cd(data, %{})
+    end
   end
 
-  defp parse_cd(<<>>, result), do: result
+  defp parse_cd(<<>>, result), do: {:ok, result}
 
   defp parse_cd(<<0x02014B50::little-32, _::binary>> = cd, result) do
     <<0x02014B50::little-32, _::little-32, flag::little-16, compression_method::little-16,
@@ -127,32 +130,28 @@ defmodule Unzip do
 
   @eocd_header_size 22
   defp find_eocd(zip) do
-    {:ok, file_size} = FileAccess.size(zip)
+    with {:ok, size} <- file_size(zip) do
+      offset_stream(size)
+      |> Enum.reduce_while({<<>>, 0}, fn {start_offset, length}, {acc, consumed} ->
+        with {:ok, data} <- pread(zip, start_offset, length) do
+          case find_and_parse_eocd(data <> acc) do
+            {%{comment_length: comment_length} = eocd, partial_comment}
+            when comment_length == byte_size(partial_comment) + consumed ->
+              {:halt, {:ok, eocd}}
 
-    Stream.unfold(file_size, fn
-      offset when offset < 0 ->
-        nil
-
-      offset ->
-        start_offset = max(offset - @chunk_size, 0)
-        {{start_offset, @chunk_size}, start_offset}
-    end)
-    |> Enum.reduce_while({<<>>, 0}, fn {start_offset, length}, {acc, consumed} ->
-      {:ok, data} = FileAccess.pread(zip, start_offset, length)
-
-      case find_and_parse_eocd(data <> acc) do
-        {%{comment_length: comment_length} = eocd, partial_comment}
-        when comment_length == byte_size(partial_comment) + consumed ->
-          {:halt, {:ok, eocd}}
-
-        _ ->
-          <<acc::binary-size(@eocd_header_size), rest::binary>> = data
-          {:cont, {acc, consumed + byte_size(rest)}}
+            _ ->
+              <<acc::binary-size(@eocd_header_size), rest::binary>> = data
+              {:cont, {acc, consumed + byte_size(rest)}}
+          end
+        else
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+      |> case do
+        {:ok, eocd} -> {:ok, eocd}
+        {:error, reason} -> {:error, reason}
+        _ -> {:error, "Invalid zip file, missing EOCD record"}
       end
-    end)
-    |> case do
-      {:ok, eocd} -> eocd
-      _ -> raise Error, message: "Invalid zip file, missing EOCD record"
     end
   end
 
@@ -175,6 +174,17 @@ defmodule Unzip do
 
   defp find_and_parse_eocd(<<_::8, rest::binary>>), do: find_and_parse_eocd(rest)
 
+  defp offset_stream(size) do
+    Stream.unfold(size, fn
+      offset when offset < 0 ->
+        nil
+
+      offset ->
+        start_offset = max(offset - @chunk_size, 0)
+        {{start_offset, @chunk_size}, start_offset}
+    end)
+  end
+
   # We should handle encoding properly by checking bit 11, but zip files seems to ignore it
   defp to_utf8(binary) do
     :unicode.characters_to_binary(binary)
@@ -183,5 +193,28 @@ defmodule Unzip do
   defp to_datetime(<<year::7, month::4, day::5>>, <<hour::5, minute::6, second::5>>) do
     {:ok, datetime} = NaiveDateTime.new(1980 + year, month, day, hour, minute, second)
     datetime
+  end
+
+  defp pread!(file, offset, length) do
+    case pread(file, offset, length) do
+      {:ok, term} -> term
+      {:error, reason} -> raise Error, message: reason
+    end
+  end
+
+  defp pread(file, offset, length) do
+    case FileAccess.pread(file, offset, length) do
+      {:ok, term} when is_binary(term) -> {:ok, term}
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, "Invalid data returned by pread/3. Expected binary"}
+    end
+  end
+
+  defp file_size(file) do
+    case FileAccess.size(file) do
+      {:ok, term} when is_integer(term) -> {:ok, term}
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, "Invalid data returned by size/1. Expected integer"}
+    end
   end
 end
