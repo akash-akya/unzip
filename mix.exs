@@ -17,7 +17,8 @@ defmodule Unzip.MixProject do
       source_url: "https://github.com/akash-akya/unzip",
       homepage_url: "https://github.com/akash-akya/unzip",
       docs: [
-        main: "Unzip"
+        main: "readme",
+        extras: ["README.md"]
       ]
     ]
   end
