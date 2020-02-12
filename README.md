@@ -11,7 +11,7 @@ Unzip tries to solve problem of accessing files from a zip which is not local (A
 ```elixir
 def deps do
   [
-    {:unzip, "~> 0.1.0"}
+    {:unzip, "~> x.x.x"}
   ]
 end
 ```
