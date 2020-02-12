@@ -241,7 +241,8 @@ defmodule Unzip do
   defp pread!(file, offset, length) do
     case pread(file, offset, length) do
       {:ok, term} -> term
-      {:error, reason} -> raise Error, message: reason
+      {:error, reason} when is_binary(reason) -> raise Error, message: reason
+      {:error, reason} -> raise Error, message: inspect(reason)
     end
   end
 
