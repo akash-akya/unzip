@@ -134,7 +134,7 @@ defmodule Unzip do
     Stream.unfold({offset, crc}, fn
       {offset, crc} when offset >= end_offset ->
         unless crc == expected_crc do
-          raise "CRC mismatch. expected: #{expected_crc} got: #{crc}"
+          raise Error, message: "CRC mismatch. expected: #{expected_crc} got: #{crc}"
         end
 
       {offset, crc} ->
@@ -169,7 +169,8 @@ defmodule Unzip do
       compressed_size: compressed_size,
       uncompressed_size: uncompressed_size,
       local_header_offset: local_header_offset,
-      file_name: to_utf8(file_name)
+      # TODO: we should treat binary as "IBM Code Page 437" encoded string if GP flag 11 is not set
+      file_name: file_name
     }
 
     parse_cd(rest, Map.put(result, file_name, entry))
@@ -230,11 +231,6 @@ defmodule Unzip do
         start_offset = max(offset - @chunk_size, 0)
         {{start_offset, @chunk_size}, start_offset}
     end)
-  end
-
-  # We should handle encoding properly by checking bit 11, but zip files seems to ignore it
-  defp to_utf8(binary) do
-    :unicode.characters_to_binary(binary)
   end
 
   defp to_datetime(<<year::7, month::4, day::5>>, <<hour::5, minute::6, second::5>>) do
