@@ -189,14 +189,13 @@ defmodule Unzip do
       offset_stream(size)
       |> Enum.reduce_while({<<>>, 0}, fn {start_offset, length}, {acc, consumed} ->
         with {:ok, data} <- pread(zip, start_offset, length) do
-          case find_and_parse_eocd(data <> acc) do
-            {%{comment_length: comment_length} = eocd, partial_comment}
-            when comment_length == byte_size(partial_comment) + consumed ->
-              {:halt, {:ok, eocd}}
-
-            _ ->
+          case find_and_parse_eocd(data <> acc, consumed) do
+            nil ->
               <<acc::binary-size(@eocd_header_size), rest::binary>> = data
               {:cont, {acc, consumed + byte_size(rest)}}
+
+            eocd ->
+              {:halt, {:ok, eocd}}
           end
         else
           {:error, reason} -> {:halt, {:error, reason}}
@@ -210,24 +209,27 @@ defmodule Unzip do
     end
   end
 
-  defp find_and_parse_eocd(data) when byte_size(data) < @eocd_header_size, do: nil
+  def find_and_parse_eocd(data, consumed),
+    do: find_and_parse_eocd(data, consumed, byte_size(data) - @eocd_header_size)
 
-  defp find_and_parse_eocd(
-         <<0x06054B50::little-32, _ignore::little-48, total_entries::little-16,
-           cd_size::little-32, cd_offset::little-32, comment_length::little-16,
-           partial_comment::binary>>
-       ) do
-    data = %{
-      total_entries: total_entries,
-      cd_size: cd_size,
-      cd_offset: cd_offset,
-      comment_length: comment_length
-    }
+  def find_and_parse_eocd(_data, _consumed, offset) when offset < 0, do: nil
 
-    {data, partial_comment}
+  def find_and_parse_eocd(data, consumed, offset) do
+    case binary_part(data, offset, @eocd_header_size) do
+      <<0x06054B50::little-32, _ignore::little-48, total_entries::little-16, cd_size::little-32,
+        cd_offset::little-32, comment_length::little-16>>
+      when comment_length == consumed ->
+        %{
+          total_entries: total_entries,
+          cd_size: cd_size,
+          cd_offset: cd_offset,
+          comment_length: comment_length
+        }
+
+      _ ->
+        find_and_parse_eocd(data, consumed + 1, offset - 1)
+    end
   end
-
-  defp find_and_parse_eocd(<<_::8, rest::binary>>), do: find_and_parse_eocd(rest)
 
   defp offset_stream(size) do
     Stream.unfold(size, fn
