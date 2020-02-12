@@ -223,7 +223,7 @@ defmodule Unzip do
 
   defp offset_stream(size) do
     Stream.unfold(size, fn
-      offset when offset < 0 ->
+      0 ->
         nil
 
       offset ->
