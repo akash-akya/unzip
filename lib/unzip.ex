@@ -145,6 +145,9 @@ defmodule Unzip do
     end)
   end
 
+  defp decompress(compression_method, _file, _offset, _local_file_header),
+    do: raise(Error, message: "Compression method #{compression_method} is not supported")
+
   defp read_cd_entries(zip, eocd) do
     with {:ok, data} <- pread(zip, eocd.cd_offset, eocd.cd_size) do
       parse_cd(data, %{})
@@ -153,27 +156,31 @@ defmodule Unzip do
 
   defp parse_cd(<<>>, result), do: {:ok, result}
 
-  defp parse_cd(<<0x02014B50::little-32, _::binary>> = cd, result) do
-    <<0x02014B50::little-32, _::little-32, flag::little-16, compression_method::little-16,
-      mtime::little-16, mdate::little-16, crc::little-32, compressed_size::little-32,
-      uncompressed_size::little-32, file_name_length::little-16, extra_field_length::little-16,
-      comment_length::little-16, _::little-64, local_header_offset::little-32,
-      file_name::binary-size(file_name_length), _::binary-size(extra_field_length),
-      _::binary-size(comment_length), rest::binary>> = cd
+  defp parse_cd(cd, result) do
+    case cd do
+      <<0x02014B50::little-32, _::little-32, flag::little-16, compression_method::little-16,
+        mtime::little-16, mdate::little-16, crc::little-32, compressed_size::little-32,
+        uncompressed_size::little-32, file_name_length::little-16, extra_field_length::little-16,
+        comment_length::little-16, _::little-64, local_header_offset::little-32,
+        file_name::binary-size(file_name_length), _::binary-size(extra_field_length),
+        _::binary-size(comment_length), rest::binary>> ->
+        entry = %{
+          bit_flag: flag,
+          compression_method: compression_method,
+          last_modified_datetime: to_datetime(<<mdate::16>>, <<mtime::16>>),
+          crc: crc,
+          compressed_size: compressed_size,
+          uncompressed_size: uncompressed_size,
+          local_header_offset: local_header_offset,
+          # TODO: we should treat binary as "IBM Code Page 437" encoded string if GP flag 11 is not set
+          file_name: file_name
+        }
 
-    entry = %{
-      bit_flag: flag,
-      compression_method: compression_method,
-      last_modified_datetime: to_datetime(<<mdate::16>>, <<mtime::16>>),
-      crc: crc,
-      compressed_size: compressed_size,
-      uncompressed_size: uncompressed_size,
-      local_header_offset: local_header_offset,
-      # TODO: we should treat binary as "IBM Code Page 437" encoded string if GP flag 11 is not set
-      file_name: file_name
-    }
+        parse_cd(rest, Map.put(result, file_name, entry))
 
-    parse_cd(rest, Map.put(result, file_name, entry))
+      _ ->
+        {:error, "Invalid zip file, invalid central directory"}
+    end
   end
 
   @eocd_header_size 22
