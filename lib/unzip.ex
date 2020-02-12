@@ -139,7 +139,7 @@ defmodule Unzip do
 
       {offset, crc} ->
         next_offset = min(offset + @chunk_size, end_offset)
-        {:ok, data} = pread!(file, offset, next_offset - offset)
+        data = pread!(file, offset, next_offset - offset)
         crc = :erlang.crc32(crc, data)
         {data, {next_offset, crc}}
     end)
