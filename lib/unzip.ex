@@ -145,6 +145,9 @@ defmodule Unzip do
     end)
   end
 
+  defp decompress(compression_method, _file, _offset, _local_file_header),
+    do: raise(Error, message: "Compression method #{compression_method} is not supported")
+
   defp read_cd_entries(zip, eocd) do
     with {:ok, data} <- pread(zip, eocd.cd_offset, eocd.cd_size) do
       parse_cd(data, %{})
@@ -153,27 +156,31 @@ defmodule Unzip do
 
   defp parse_cd(<<>>, result), do: {:ok, result}
 
-  defp parse_cd(<<0x02014B50::little-32, _::binary>> = cd, result) do
-    <<0x02014B50::little-32, _::little-32, flag::little-16, compression_method::little-16,
-      mtime::little-16, mdate::little-16, crc::little-32, compressed_size::little-32,
-      uncompressed_size::little-32, file_name_length::little-16, extra_field_length::little-16,
-      comment_length::little-16, _::little-64, local_header_offset::little-32,
-      file_name::binary-size(file_name_length), _::binary-size(extra_field_length),
-      _::binary-size(comment_length), rest::binary>> = cd
+  defp parse_cd(cd, result) do
+    case cd do
+      <<0x02014B50::little-32, _::little-32, flag::little-16, compression_method::little-16,
+        mtime::little-16, mdate::little-16, crc::little-32, compressed_size::little-32,
+        uncompressed_size::little-32, file_name_length::little-16, extra_field_length::little-16,
+        comment_length::little-16, _::little-64, local_header_offset::little-32,
+        file_name::binary-size(file_name_length), _::binary-size(extra_field_length),
+        _::binary-size(comment_length), rest::binary>> ->
+        entry = %{
+          bit_flag: flag,
+          compression_method: compression_method,
+          last_modified_datetime: to_datetime(<<mdate::16>>, <<mtime::16>>),
+          crc: crc,
+          compressed_size: compressed_size,
+          uncompressed_size: uncompressed_size,
+          local_header_offset: local_header_offset,
+          # TODO: we should treat binary as "IBM Code Page 437" encoded string if GP flag 11 is not set
+          file_name: file_name
+        }
 
-    entry = %{
-      bit_flag: flag,
-      compression_method: compression_method,
-      last_modified_datetime: to_datetime(<<mdate::16>>, <<mtime::16>>),
-      crc: crc,
-      compressed_size: compressed_size,
-      uncompressed_size: uncompressed_size,
-      local_header_offset: local_header_offset,
-      # TODO: we should treat binary as "IBM Code Page 437" encoded string if GP flag 11 is not set
-      file_name: file_name
-    }
+        parse_cd(rest, Map.put(result, file_name, entry))
 
-    parse_cd(rest, Map.put(result, file_name, entry))
+      _ ->
+        {:error, "Invalid zip file, invalid central directory"}
+    end
   end
 
   @eocd_header_size 22
@@ -182,14 +189,13 @@ defmodule Unzip do
       offset_stream(size)
       |> Enum.reduce_while({<<>>, 0}, fn {start_offset, length}, {acc, consumed} ->
         with {:ok, data} <- pread(zip, start_offset, length) do
-          case find_and_parse_eocd(data <> acc) do
-            {%{comment_length: comment_length} = eocd, partial_comment}
-            when comment_length == byte_size(partial_comment) + consumed ->
-              {:halt, {:ok, eocd}}
-
-            _ ->
+          case find_and_parse_eocd(data <> acc, consumed) do
+            nil ->
               <<acc::binary-size(@eocd_header_size), rest::binary>> = data
               {:cont, {acc, consumed + byte_size(rest)}}
+
+            eocd ->
+              {:halt, {:ok, eocd}}
           end
         else
           {:error, reason} -> {:halt, {:error, reason}}
@@ -203,24 +209,27 @@ defmodule Unzip do
     end
   end
 
-  defp find_and_parse_eocd(data) when byte_size(data) < @eocd_header_size, do: nil
+  def find_and_parse_eocd(data, consumed),
+    do: find_and_parse_eocd(data, consumed, byte_size(data) - @eocd_header_size)
 
-  defp find_and_parse_eocd(
-         <<0x06054B50::little-32, _ignore::little-48, total_entries::little-16,
-           cd_size::little-32, cd_offset::little-32, comment_length::little-16,
-           partial_comment::binary>>
-       ) do
-    data = %{
-      total_entries: total_entries,
-      cd_size: cd_size,
-      cd_offset: cd_offset,
-      comment_length: comment_length
-    }
+  def find_and_parse_eocd(_data, _consumed, offset) when offset < 0, do: nil
 
-    {data, partial_comment}
+  def find_and_parse_eocd(data, consumed, offset) do
+    case binary_part(data, offset, @eocd_header_size) do
+      <<0x06054B50::little-32, _ignore::little-48, total_entries::little-16, cd_size::little-32,
+        cd_offset::little-32, comment_length::little-16>>
+      when comment_length == consumed ->
+        %{
+          total_entries: total_entries,
+          cd_size: cd_size,
+          cd_offset: cd_offset,
+          comment_length: comment_length
+        }
+
+      _ ->
+        find_and_parse_eocd(data, consumed + 1, offset - 1)
+    end
   end
-
-  defp find_and_parse_eocd(<<_::8, rest::binary>>), do: find_and_parse_eocd(rest)
 
   defp offset_stream(size) do
     Stream.unfold(size, fn
@@ -241,7 +250,8 @@ defmodule Unzip do
   defp pread!(file, offset, length) do
     case pread(file, offset, length) do
       {:ok, term} -> term
-      {:error, reason} -> raise Error, message: reason
+      {:error, reason} when is_binary(reason) -> raise Error, message: reason
+      {:error, reason} -> raise Error, message: inspect(reason)
     end
   end
 

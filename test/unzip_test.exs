@@ -1,25 +1,103 @@
 defmodule UnzipTest do
   use ExUnit.Case
-  import Unzip
 
-  @sample_zip Path.join(__DIR__, "support/zip_2MB.zip")
+  @fixture_path Path.join(__DIR__, "support/")
 
-  test "stream" do
-    file = Unzip.LocalFile.open(@sample_zip)
+  test "zip with invalid central directory" do
+    assert {:error, "Invalid zip file, invalid central directory"} =
+             Unzip.new(local_zip("bad_central_directory.zip"))
+  end
 
-    try do
-      {:ok, unzip} = Unzip.new(file)
-      files = Unzip.list_entries(unzip)
+  test "zip with missing EOCD record" do
+    assert {:error, "Invalid zip file, missing EOCD record"} =
+             Unzip.new(local_zip("bad_eocd.zip"))
+  end
 
-      files
-      |> Enum.map(fn entry ->
-        IO.inspect(entry)
+  test "zip with bad file local header" do
+    {:ok, file} = Unzip.new(local_zip("bad_file_header.zip"))
 
-        file_stream!(unzip, entry.file_name)
-        |> Stream.run()
-      end)
-    after
-      Unzip.LocalFile.close(file)
+    assert_raise Unzip.Error, "Compression method 30840 is not supported", fn ->
+      Unzip.file_stream!(file, "abc.txt")
+      |> Stream.run()
     end
+  end
+
+  test "list_entries/1" do
+    {:ok, file} = Unzip.new(local_zip("abc.zip"))
+
+    assert [
+             %Unzip.Entry{
+               compressed_size: 701,
+               file_name: "abc.txt",
+               last_modified_datetime: ~N[2006-05-03 10:14:10],
+               uncompressed_size: 1300
+             },
+             %Unzip.Entry{
+               compressed_size: 0,
+               file_name: "empty/",
+               last_modified_datetime: ~N[2008-04-23 14:38:58],
+               uncompressed_size: 0
+             },
+             %Unzip.Entry{
+               compressed_size: 0,
+               file_name: "emptyFile",
+               last_modified_datetime: ~N[2008-04-23 18:20:52],
+               uncompressed_size: 0
+             },
+             %Unzip.Entry{
+               compressed_size: 36,
+               file_name: "quotes/rain.txt",
+               last_modified_datetime: ~N[2008-04-04 11:05:42],
+               uncompressed_size: 44
+             },
+             %Unzip.Entry{
+               compressed_size: 949,
+               file_name: "wikipedia.txt",
+               last_modified_datetime: ~N[2008-04-23 18:20:36],
+               uncompressed_size: 1790
+             }
+           ] = Unzip.list_entries(file)
+  end
+
+  test "stream!" do
+    {:ok, file} = Unzip.new(local_zip("abc.zip"))
+
+    assert "The rain in Spain stays mainly in the plain\n" =
+             Unzip.file_stream!(file, "quotes/rain.txt") |> Enum.join()
+
+    {:ok, file} = Unzip.new(local_zip("zip_2MB.zip"))
+
+    result =
+      Unzip.file_stream!(file, "zip_10MB/file-sample_1MB.doc")
+      |> Enum.to_list()
+      |> IO.iodata_to_binary()
+
+    assert File.read!(Path.join(@fixture_path, "file-sample_1MB.doc")) == result
+  end
+
+  test "decompression for deflate" do
+    {:ok, file} = Unzip.new(local_zip("deflate.zip"))
+
+    result =
+      Unzip.file_stream!(file, "file-sample_1MB.doc")
+      |> Enum.to_list()
+      |> IO.iodata_to_binary()
+
+    assert File.read!(Path.join(@fixture_path, "file-sample_1MB.doc")) == result
+  end
+
+  test "decompression for store" do
+    {:ok, file} = Unzip.new(local_zip("stored.zip"))
+
+    result =
+      Unzip.file_stream!(file, "file-sample_1MB.doc")
+      |> Enum.to_list()
+      |> IO.iodata_to_binary()
+
+    assert File.read!(Path.join(@fixture_path, "file-sample_1MB.doc")) == result
+  end
+
+  defp local_zip(file_name) do
+    Unzip.LocalFile.open(Path.join(@fixture_path, file_name))
   end
 end
