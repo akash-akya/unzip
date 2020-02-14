@@ -87,6 +87,10 @@ defmodule Unzip do
   Returns decompressed file entry from the zip as a stream. `file_name` *must* be complete file path. File is read in the chunks of 65k
   """
   def file_stream!(%Unzip{zip: zip, cd_list: cd_list}, file_name) do
+    unless Map.has_key?(cd_list, file_name) do
+      raise Error, message: "File #{inspect(file_name)} not present in the zip"
+    end
+
     entry = Map.fetch!(cd_list, file_name)
     local_header = pread!(zip, entry.local_header_offset, 30)
 
