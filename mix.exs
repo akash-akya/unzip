@@ -34,7 +34,7 @@ defmodule Unzip.MixProject do
   end
 
   defp description do
-    "Module to get files out of a zip. Works with local and remote files"
+    "Module to get files out of a zip. Works with local and remote files. Supports Zip64"
   end
 
   defp package do
