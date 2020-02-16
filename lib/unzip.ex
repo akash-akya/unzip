@@ -98,60 +98,59 @@ defmodule Unzip do
       file_name_length::little-16, extra_field_length::little-16>> = local_header
 
     offset = entry.local_header_offset + 30 + file_name_length + extra_field_length
-    decompress(compression_method, zip, offset, entry)
+
+    stream!(zip, offset, entry.compressed_size)
+    |> decompress(compression_method)
+    |> crc_check(entry.crc)
   end
 
-  defp decompress(0x8, file, offset, %{crc: expected_crc, compressed_size: size}) do
+  defp stream!(file, offset, size) do
     end_offset = offset + size
 
-    Stream.resource(
+    Stream.unfold(offset, fn
+      offset when offset >= end_offset ->
+        nil
+
+      offset ->
+        next_offset = min(offset + @chunk_size, end_offset)
+        data = pread!(file, offset, next_offset - offset)
+        {data, next_offset}
+    end)
+  end
+
+  defp decompress(stream, 0x8) do
+    stream
+    |> Stream.transform(
       fn ->
         z = :zlib.open()
         :ok = :zlib.inflateInit(z, -15)
-        {z, offset}
+        z
       end,
-      fn
-        {z, offset} when offset >= end_offset ->
-          {:halt, {z, nil}}
-
-        {z, offset} ->
-          next_offset = min(offset + @chunk_size, end_offset)
-          data = pread!(file, offset, next_offset - offset)
-          {[:zlib.inflate(z, data)], {z, next_offset}}
-      end,
-      fn {z, _} ->
-        crc = :zlib.crc32(z)
-
-        unless crc == expected_crc do
-          raise Error, message: "CRC mismatch. expected: #{expected_crc} got: #{crc}"
-        end
-
+      fn data, z -> {[:zlib.inflate(z, data)], z} end,
+      fn z ->
         :zlib.inflateEnd(z)
         :zlib.close(z)
       end
     )
   end
 
-  defp decompress(0x0, file, offset, %{crc: expected_crc, compressed_size: size}) do
-    end_offset = offset + size
-    crc = :erlang.crc32(<<>>)
+  defp decompress(stream, 0x0), do: stream
 
-    Stream.unfold({offset, crc}, fn
-      {offset, crc} when offset >= end_offset ->
+  defp decompress(_stream, compression_method),
+    do: raise(Error, message: "Compression method #{compression_method} is not supported")
+
+  defp crc_check(stream, expected_crc) do
+    stream
+    |> Stream.transform(
+      fn -> :erlang.crc32(<<>>) end,
+      fn data, crc -> {[data], :erlang.crc32(crc, data)} end,
+      fn crc ->
         unless crc == expected_crc do
           raise Error, message: "CRC mismatch. expected: #{expected_crc} got: #{crc}"
         end
-
-      {offset, crc} ->
-        next_offset = min(offset + @chunk_size, end_offset)
-        data = pread!(file, offset, next_offset - offset)
-        crc = :erlang.crc32(crc, data)
-        {data, {next_offset, crc}}
-    end)
+      end
+    )
   end
-
-  defp decompress(compression_method, _file, _offset, _local_file_header),
-    do: raise(Error, message: "Compression method #{compression_method} is not supported")
 
   defp read_cd_entries(zip, eocd) do
     with {:ok, data} <- pread(zip, eocd.cd_offset, eocd.cd_size) do
