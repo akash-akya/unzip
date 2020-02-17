@@ -97,6 +97,27 @@ defmodule UnzipTest do
     assert File.read!(Path.join(@fixture_path, "file-sample_1MB.doc")) == result
   end
 
+  describe "zip64" do
+    test "file_stream" do
+      {:ok, file} = Unzip.new(local_zip("Zeros.zip"))
+
+      assert [
+               %Unzip.Entry{
+                 compressed_size: 5_611_526,
+                 file_name: "0000",
+                 last_modified_datetime: ~N[2011-03-25 17:14:14],
+                 uncompressed_size: 5_368_709_120
+               }
+             ] = Unzip.list_entries(file)
+    end
+
+    test "large number of entires" do
+      {:ok, file} = Unzip.new(local_zip("90,000_files.zip"))
+      entries = Unzip.list_entries(file)
+      assert length(entries) == 90_000
+    end
+  end
+
   defp local_zip(file_name) do
     Unzip.LocalFile.open(Path.join(@fixture_path, file_name))
   end

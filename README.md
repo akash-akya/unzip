@@ -1,6 +1,6 @@
 # Unzip [![Hex.pm](https://img.shields.io/hexpm/v/unzip.svg)](https://hex.pm/packages/unzip)
 
-Module to get files out of a zip. Works with local and remote files
+Module to get files out of a zip. Works with local and remote files. Supports Zip64.
 
 ## Overview
 
@@ -32,7 +32,7 @@ file_entries = Unzip.list_entries(unzip)
 stream = Unzip.file_stream!(unzip, "baz.png")
 ```
 
-Supports STORED and DEFLATE compression methods. Does not support zip64 specification yet.
+Supports STORED and DEFLATE compression methods. Supports zip64 specification.
 
 ## Implementing `Unzip.FileAccess` protocol
 

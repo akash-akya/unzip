@@ -25,6 +25,7 @@ defmodule Unzip do
   """
   require Logger
   alias Unzip.FileAccess
+  alias Unzip.FileBuffer
   use Bitwise, only_operators: true
 
   @chunk_size 65_000
@@ -86,6 +87,10 @@ defmodule Unzip do
   Returns decompressed file entry from the zip as a stream. `file_name` *must* be complete file path. File is read in the chunks of 65k
   """
   def file_stream!(%Unzip{zip: zip, cd_list: cd_list}, file_name) do
+    unless Map.has_key?(cd_list, file_name) do
+      raise Error, message: "File #{inspect(file_name)} not present in the zip"
+    end
+
     entry = Map.fetch!(cd_list, file_name)
     local_header = pread!(zip, entry.local_header_offset, 30)
 
@@ -93,60 +98,59 @@ defmodule Unzip do
       file_name_length::little-16, extra_field_length::little-16>> = local_header
 
     offset = entry.local_header_offset + 30 + file_name_length + extra_field_length
-    decompress(compression_method, zip, offset, entry)
+
+    stream!(zip, offset, entry.compressed_size)
+    |> decompress(compression_method)
+    |> crc_check(entry.crc)
   end
 
-  defp decompress(0x8, file, offset, %{crc: expected_crc, compressed_size: size}) do
+  defp stream!(file, offset, size) do
     end_offset = offset + size
 
-    Stream.resource(
+    Stream.unfold(offset, fn
+      offset when offset >= end_offset ->
+        nil
+
+      offset ->
+        next_offset = min(offset + @chunk_size, end_offset)
+        data = pread!(file, offset, next_offset - offset)
+        {data, next_offset}
+    end)
+  end
+
+  defp decompress(stream, 0x8) do
+    stream
+    |> Stream.transform(
       fn ->
         z = :zlib.open()
         :ok = :zlib.inflateInit(z, -15)
-        {z, offset}
+        z
       end,
-      fn
-        {z, offset} when offset >= end_offset ->
-          {:halt, {z, nil}}
-
-        {z, offset} ->
-          next_offset = min(offset + @chunk_size, end_offset)
-          data = pread!(file, offset, next_offset - offset)
-          {[:zlib.inflate(z, data)], {z, next_offset}}
-      end,
-      fn {z, _} ->
-        crc = :zlib.crc32(z)
-
-        unless crc == expected_crc do
-          raise Error, message: "CRC mismatch. expected: #{expected_crc} got: #{crc}"
-        end
-
+      fn data, z -> {[:zlib.inflate(z, data)], z} end,
+      fn z ->
         :zlib.inflateEnd(z)
         :zlib.close(z)
       end
     )
   end
 
-  defp decompress(0x0, file, offset, %{crc: expected_crc, compressed_size: size}) do
-    end_offset = offset + size
-    crc = :erlang.crc32(<<>>)
+  defp decompress(stream, 0x0), do: stream
 
-    Stream.unfold({offset, crc}, fn
-      {offset, crc} when offset >= end_offset ->
+  defp decompress(_stream, compression_method),
+    do: raise(Error, message: "Compression method #{compression_method} is not supported")
+
+  defp crc_check(stream, expected_crc) do
+    stream
+    |> Stream.transform(
+      fn -> :erlang.crc32(<<>>) end,
+      fn data, crc -> {[data], :erlang.crc32(crc, data)} end,
+      fn crc ->
         unless crc == expected_crc do
           raise Error, message: "CRC mismatch. expected: #{expected_crc} got: #{crc}"
         end
-
-      {offset, crc} ->
-        next_offset = min(offset + @chunk_size, end_offset)
-        data = pread!(file, offset, next_offset - offset)
-        crc = :erlang.crc32(crc, data)
-        {data, {next_offset, crc}}
-    end)
+      end
+    )
   end
-
-  defp decompress(compression_method, _file, _offset, _local_file_header),
-    do: raise(Error, message: "Compression method #{compression_method} is not supported")
 
   defp read_cd_entries(zip, eocd) do
     with {:ok, data} <- pread(zip, eocd.cd_offset, eocd.cd_size) do
@@ -162,7 +166,7 @@ defmodule Unzip do
         mtime::little-16, mdate::little-16, crc::little-32, compressed_size::little-32,
         uncompressed_size::little-32, file_name_length::little-16, extra_field_length::little-16,
         comment_length::little-16, _::little-64, local_header_offset::little-32,
-        file_name::binary-size(file_name_length), _::binary-size(extra_field_length),
+        file_name::binary-size(file_name_length), extra_fields::binary-size(extra_field_length),
         _::binary-size(comment_length), rest::binary>> ->
         entry = %{
           bit_flag: flag,
@@ -176,70 +180,120 @@ defmodule Unzip do
           file_name: file_name
         }
 
-        parse_cd(rest, Map.put(result, file_name, entry))
+        if need_zip64_extra?(entry) do
+          parse_cd(rest, Map.put(result, file_name, merge_zip64_extra(entry, extra_fields)))
+        else
+          parse_cd(rest, Map.put(result, file_name, entry))
+        end
 
       _ ->
         {:error, "Invalid zip file, invalid central directory"}
     end
   end
 
+  defp need_zip64_extra?(%{
+         compressed_size: cs,
+         uncompressed_size: ucs,
+         local_header_offset: offset
+       }) do
+    Enum.any?([cs, ucs, offset], &(&1 == 0xFFFFFFFF))
+  end
+
+  @zip64_extra_field_id 0x0001
+  defp merge_zip64_extra(entry, extra) do
+    zip64_extra =
+      find_extra_fields(extra)
+      |> Map.fetch!(@zip64_extra_field_id)
+
+    {entry, zip64_extra} =
+      if entry[:uncompressed_size] == 0xFFFFFFFF do
+        <<uncompressed_size::little-64, zip64_extra::binary>> = zip64_extra
+        {%{entry | uncompressed_size: uncompressed_size}, zip64_extra}
+      else
+        {entry, zip64_extra}
+      end
+
+    {entry, zip64_extra} =
+      if entry[:compressed_size] == 0xFFFFFFFF do
+        <<compressed_size::little-64, zip64_extra::binary>> = zip64_extra
+        {%{entry | compressed_size: compressed_size}, zip64_extra}
+      else
+        {entry, zip64_extra}
+      end
+
+    {entry, _zip64_extra} =
+      if entry[:local_header_offset] == 0xFFFFFFFF do
+        <<local_header_offset::little-64, zip64_extra::binary>> = zip64_extra
+        {%{entry | local_header_offset: local_header_offset}, zip64_extra}
+      else
+        {entry, zip64_extra}
+      end
+
+    entry
+  end
+
+  defp find_extra_fields(extra, result \\ %{})
+  defp find_extra_fields(<<>>, result), do: result
+
+  defp find_extra_fields(
+         <<id::little-16, size::little-16, data::binary-size(size), rest::binary>>,
+         result
+       ) do
+    find_extra_fields(rest, Map.put(result, id, data))
+  end
+
   @eocd_header_size 22
   defp find_eocd(zip) do
-    with {:ok, size} <- file_size(zip) do
-      offset_stream(size)
-      |> Enum.reduce_while({<<>>, 0}, fn {start_offset, length}, {acc, consumed} ->
-        with {:ok, data} <- pread(zip, start_offset, length) do
-          case find_and_parse_eocd(data <> acc, consumed) do
-            nil ->
-              <<acc::binary-size(@eocd_header_size), rest::binary>> = data
-              {:cont, {acc, consumed + byte_size(rest)}}
+    with {:ok, file_buffer} <- FileBuffer.new(zip, @chunk_size),
+         {:ok, eocd, file_buffer} <- find_eocd(file_buffer, 0) do
+      case find_zip64_eocd(file_buffer) do
+        {:ok, zip64_eocd} ->
+          {:ok, zip64_eocd}
 
-            eocd ->
-              {:halt, {:ok, eocd}}
-          end
-        else
-          {:error, reason} -> {:halt, {:error, reason}}
-        end
-      end)
-      |> case do
-        {:ok, eocd} -> {:ok, eocd}
-        {:error, reason} -> {:error, reason}
-        _ -> {:error, "Invalid zip file, missing EOCD record"}
+        _ ->
+          {:ok, eocd}
       end
     end
   end
 
-  def find_and_parse_eocd(data, consumed),
-    do: find_and_parse_eocd(data, consumed, byte_size(data) - @eocd_header_size)
+  @zip64_eocd_locator_size 20
+  @zip64_eocd_size 56
+  defp find_zip64_eocd(file_buffer) do
+    with {:ok, chunk, file_buffer} <-
+           FileBuffer.next_chunk(file_buffer, @zip64_eocd_locator_size),
+         true <- zip64?(chunk) do
+      <<0x07064B50::little-32, _::little-32, eocd_offset::little-64, _::little-32>> = chunk
 
-  def find_and_parse_eocd(_data, _consumed, offset) when offset < 0, do: nil
+      {:ok,
+       <<0x06064B50::little-32, _::64, _::16, _::16, _::32, _::32, _::64,
+         total_entries::little-64, cd_size::little-64,
+         cd_offset::little-64>>} = pread(file_buffer.file, eocd_offset, @zip64_eocd_size)
 
-  def find_and_parse_eocd(data, consumed, offset) do
-    case binary_part(data, offset, @eocd_header_size) do
-      <<0x06054B50::little-32, _ignore::little-48, total_entries::little-16, cd_size::little-32,
-        cd_offset::little-32, comment_length::little-16>>
-      when comment_length == consumed ->
-        %{
-          total_entries: total_entries,
-          cd_size: cd_size,
-          cd_offset: cd_offset,
-          comment_length: comment_length
-        }
-
+      {:ok, %{total_entries: total_entries, cd_size: cd_size, cd_offset: cd_offset}}
+    else
       _ ->
-        find_and_parse_eocd(data, consumed + 1, offset - 1)
+        false
     end
   end
 
-  defp offset_stream(size) do
-    Stream.unfold(size, fn
-      0 ->
-        nil
+  defp zip64?(<<0x07064B50::little-32, _::little-128>>), do: true
+  defp zip64?(_), do: false
 
-      offset ->
-        start_offset = max(offset - @chunk_size, 0)
-        {{start_offset, @chunk_size}, start_offset}
-    end)
+  defp find_eocd(file_buffer, consumed) do
+    with {:ok, chunk, file_buffer} <- FileBuffer.next_chunk(file_buffer, @eocd_header_size) do
+      case chunk do
+        <<0x06054B50::little-32, _ignore::little-48, total_entries::little-16, cd_size::little-32,
+          cd_offset::little-32, ^consumed::little-16>> ->
+          {:ok, %{total_entries: total_entries, cd_size: cd_size, cd_offset: cd_offset},
+           FileBuffer.move_by(file_buffer, @eocd_header_size)}
+
+        chunk when byte_size(chunk) < @eocd_header_size ->
+          {:error, "Invalid zip file, missing EOCD record"}
+
+        _ ->
+          find_eocd(FileBuffer.move_by(file_buffer, 1), consumed + 1)
+      end
+    end
   end
 
   defp to_datetime(<<year::7, month::4, day::5>>, <<hour::5, minute::6, second::5>>) do
@@ -257,17 +311,14 @@ defmodule Unzip do
 
   defp pread(file, offset, length) do
     case FileAccess.pread(file, offset, length) do
-      {:ok, term} when is_binary(term) -> {:ok, term}
-      {:error, reason} -> {:error, reason}
-      _ -> {:error, "Invalid data returned by pread/3. Expected binary"}
-    end
-  end
+      {:ok, term} when is_binary(term) ->
+        {:ok, term}
 
-  defp file_size(file) do
-    case FileAccess.size(file) do
-      {:ok, term} when is_integer(term) -> {:ok, term}
-      {:error, reason} -> {:error, reason}
-      _ -> {:error, "Invalid data returned by size/1. Expected integer"}
+      {:error, reason} ->
+        {:error, reason}
+
+      _ ->
+        {:error, "Invalid data returned by pread/3. Expected binary"}
     end
   end
 end
