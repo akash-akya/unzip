@@ -298,9 +298,14 @@ defmodule Unzip do
 
   defp to_datetime(<<year::7, month::4, day::5>> = date, <<hour::5, minute::6, second::5>> = time) do
     case NaiveDateTime.new(1980 + year, month, day, hour, minute, second * 2) do
-      {:ok, datetime}  -> datetime
-       _ ->
-        Logger.info("Unable to create datetime from: date: #{inspect(date)} time: #{inspect(time)}")
+      {:ok, datetime} ->
+        datetime
+
+      _ ->
+        Logger.warn(
+          "[unzip] invalid datetime. date: #{inspect_binary(date)} time: #{inspect_binary(time)}"
+        )
+
         nil
     end
   end
@@ -325,4 +330,6 @@ defmodule Unzip do
         {:error, "Invalid data returned by pread/3. Expected binary"}
     end
   end
+
+  defp inspect_binary(binary), do: inspect(binary, binaries: :as_binaries, base: :hex)
 end
