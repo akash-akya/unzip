@@ -296,9 +296,13 @@ defmodule Unzip do
     end
   end
 
-  defp to_datetime(<<year::7, month::4, day::5>>, <<hour::5, minute::6, second::5>>) do
-    {:ok, datetime} = NaiveDateTime.new(1980 + year, month, day, hour, minute, second * 2)
-    datetime
+  defp to_datetime(<<year::7, month::4, day::5>> = date, <<hour::5, minute::6, second::5>> = time) do
+    case NaiveDateTime.new(1980 + year, month, day, hour, minute, second * 2) do
+      {:ok, datetime}  -> datetime
+       _ ->
+        Logger.info("Unable to create datetime from: date: #{inspect(date)} time: #{inspect(time)}")
+        nil
+    end
   end
 
   defp pread!(file, offset, length) do
