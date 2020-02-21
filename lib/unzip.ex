@@ -242,7 +242,6 @@ defmodule Unzip do
     find_extra_fields(rest, Map.put(result, id, data))
   end
 
-  @eocd_header_size 22
   defp find_eocd(zip) do
     with {:ok, file_buffer} <- FileBuffer.new(zip, @chunk_size),
          {:ok, eocd, file_buffer} <- find_eocd(file_buffer, 0) do
@@ -258,6 +257,7 @@ defmodule Unzip do
 
   @zip64_eocd_locator_size 20
   @zip64_eocd_size 56
+
   defp find_zip64_eocd(file_buffer) do
     with {:ok, chunk, file_buffer} <-
            FileBuffer.next_chunk(file_buffer, @zip64_eocd_locator_size),
@@ -279,6 +279,15 @@ defmodule Unzip do
   defp zip64?(<<0x07064B50::little-32, _::little-128>>), do: true
   defp zip64?(_), do: false
 
+  # Spec has variable length comment at the end of zip after EOCD, so
+  # EOCD can anywhere in the zip file. To avoid exhaustive search, we
+  # limit search space to last 5Mb. If we don't find EOCD within that
+  # we assume it's an invalid zip
+  @eocd_seach_limit 5 * 1024 * 1024
+  defp find_eocd(_file_buffer, consumed) when consumed > @eocd_seach_limit,
+    do: {:error, "Invalid zip file, missing EOCD record"}
+
+  @eocd_header_size 22
   defp find_eocd(file_buffer, consumed) do
     with {:ok, chunk, file_buffer} <- FileBuffer.next_chunk(file_buffer, @eocd_header_size) do
       case chunk do
