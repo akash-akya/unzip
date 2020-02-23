@@ -1,7 +1,7 @@
 defmodule Unzip.FileBuffer do
   @moduledoc false
 
-  defstruct [:file, :file_size, :buffer, :buffer_size, :buffer_position]
+  defstruct [:file, :limit, :buffer, :buffer_size, :buffer_position, :direction]
   alias __MODULE__
 
   def new(file, buffer_size) do
@@ -11,11 +11,48 @@ defmodule Unzip.FileBuffer do
       {:ok,
        %FileBuffer{
          file: file,
-         file_size: size,
+         limit: size,
          buffer: <<>>,
          buffer_position: position,
-         buffer_size: buffer_size
+         buffer_size: buffer_size,
+         direction: :backward
        }}
+    end
+  end
+
+  def new(file, buffer_size, limit, position, direction) do
+    with {:ok, size} <- file_size(file) do
+      if limit > size do
+        {:error, "Invalid limit"}
+      else
+        {:ok,
+         %FileBuffer{
+           file: file,
+           limit: limit,
+           buffer: <<>>,
+           buffer_position: position,
+           buffer_size: buffer_size,
+           direction: direction
+         }}
+      end
+    end
+  end
+
+  def next_chunk(%FileBuffer{direction: :forward} = buffer, size) do
+    buffer_end_pos = buffer.buffer_position + byte_size(buffer.buffer)
+    end_pos = min(buffer.buffer_position + size, buffer.limit)
+
+    if end_pos > buffer_end_pos do
+      new_buffer_end_pos = min(buffer.limit, max(buffer_end_pos + buffer.buffer_size, end_pos))
+      chunk_size = new_buffer_end_pos - buffer.buffer_position
+
+      with {:ok, binary} <-
+             pread(buffer.file, buffer.buffer_position + byte_size(buffer.buffer), chunk_size) do
+        buffer = %FileBuffer{buffer | buffer: buffer.buffer <> binary}
+        {:ok, binary_part(buffer.buffer, 0, min(size, byte_size(buffer.buffer))), buffer}
+      end
+    else
+      {:ok, binary_part(buffer.buffer, 0, min(size, byte_size(buffer.buffer))), buffer}
     end
   end
 
@@ -44,8 +81,27 @@ defmodule Unzip.FileBuffer do
     end
   end
 
-  def move_by(buffer, count) do
-    %FileBuffer{buffer | buffer: binary_part(buffer.buffer, 0, byte_size(buffer.buffer) - count)}
+  def move_backward_by(%FileBuffer{buffer: buffer}, count) when byte_size(buffer) < count,
+    do: {:error, :invalid_count}
+
+  def move_backward_by(buffer, count) do
+    {:ok,
+     %FileBuffer{
+       buffer
+       | buffer: binary_part(buffer.buffer, 0, byte_size(buffer.buffer) - count)
+     }}
+  end
+
+  def move_forward_by(%FileBuffer{buffer: buffer}, count) when byte_size(buffer) < count,
+    do: {:error, :invalid_count}
+
+  def move_forward_by(buffer, count) do
+    {:ok,
+     %FileBuffer{
+       buffer
+       | buffer: binary_part(buffer.buffer, count, byte_size(buffer.buffer) - count),
+         buffer_position: min(buffer.buffer_position + count, buffer.limit)
+     }}
   end
 
   defp pread(file, offset, length) do
