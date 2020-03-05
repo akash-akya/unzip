@@ -153,42 +153,56 @@ defmodule Unzip do
   end
 
   defp read_cd_entries(zip, eocd) do
-    with {:ok, data} <- pread(zip, eocd.cd_offset, eocd.cd_size) do
-      parse_cd(data, %{})
+    with {:ok, file_buffer} <-
+           FileBuffer.new(
+             zip,
+             @chunk_size,
+             eocd.cd_offset + eocd.cd_size,
+             eocd.cd_offset,
+             :forward
+           ) do
+      parse_cd(file_buffer, %{})
     end
   end
 
-  defp parse_cd(<<>>, result), do: {:ok, result}
+  defp parse_cd(%FileBuffer{buffer_position: pos, limit: limit}, result) when pos >= limit,
+    do: {:ok, result}
 
-  defp parse_cd(cd, result) do
-    case cd do
-      <<0x02014B50::little-32, _::little-32, flag::little-16, compression_method::little-16,
-        mtime::little-16, mdate::little-16, crc::little-32, compressed_size::little-32,
-        uncompressed_size::little-32, file_name_length::little-16, extra_field_length::little-16,
-        comment_length::little-16, _::little-64, local_header_offset::little-32,
-        file_name::binary-size(file_name_length), extra_fields::binary-size(extra_field_length),
-        _::binary-size(comment_length), rest::binary>> ->
-        entry = %{
-          bit_flag: flag,
-          compression_method: compression_method,
-          last_modified_datetime: to_datetime(<<mdate::16>>, <<mtime::16>>),
-          crc: crc,
-          compressed_size: compressed_size,
-          uncompressed_size: uncompressed_size,
-          local_header_offset: local_header_offset,
-          # TODO: we should treat binary as "IBM Code Page 437" encoded string if GP flag 11 is not set
-          file_name: file_name
-        }
+  defp parse_cd(buffer, result) do
+    with {:ok, chunk, buffer} <- FileBuffer.next_chunk(buffer, 46),
+         <<0x02014B50::little-32, _::little-32, flag::little-16, compression_method::little-16,
+           mtime::little-16, mdate::little-16, crc::little-32, compressed_size::little-32,
+           uncompressed_size::little-32, file_name_length::little-16,
+           extra_field_length::little-16, comment_length::little-16, _::little-64,
+           local_header_offset::little-32>> <- chunk,
+         {:ok, buffer} <- FileBuffer.move_forward_by(buffer, 46),
+         {:ok, file_name, buffer} <- FileBuffer.next_chunk(buffer, file_name_length),
+         {:ok, buffer} <- FileBuffer.move_forward_by(buffer, file_name_length),
+         {:ok, extra_fields, buffer} <- FileBuffer.next_chunk(buffer, extra_field_length),
+         {:ok, buffer} <- FileBuffer.move_forward_by(buffer, extra_field_length),
+         {:ok, _file_comment, buffer} <- FileBuffer.next_chunk(buffer, comment_length),
+         {:ok, buffer} <- FileBuffer.move_forward_by(buffer, comment_length) do
+      entry = %{
+        bit_flag: flag,
+        compression_method: compression_method,
+        last_modified_datetime: to_datetime(<<mdate::16>>, <<mtime::16>>),
+        crc: crc,
+        compressed_size: compressed_size,
+        uncompressed_size: uncompressed_size,
+        local_header_offset: local_header_offset,
+        # TODO: we should treat binary as "IBM Code Page 437" encoded string if GP flag 11 is not set
+        file_name: file_name
+      }
 
-        if need_zip64_extra?(entry) do
-          parse_cd(rest, Map.put(result, file_name, merge_zip64_extra(entry, extra_fields)))
-        else
-          parse_cd(rest, Map.put(result, file_name, entry))
-        end
-
-      _ ->
-        {:error, "Invalid zip file, invalid central directory"}
+      if need_zip64_extra?(entry) do
+        parse_cd(buffer, Map.put(result, file_name, merge_zip64_extra(entry, extra_fields)))
+      else
+        parse_cd(buffer, Map.put(result, file_name, entry))
+      end
     end
+  else
+    {:error, :invalid_count} -> {:error, "Invalid zip file, invalid central directory"}
+    error -> error
   end
 
   defp need_zip64_extra?(%{
@@ -293,14 +307,15 @@ defmodule Unzip do
       case chunk do
         <<0x06054B50::little-32, _ignore::little-48, total_entries::little-16, cd_size::little-32,
           cd_offset::little-32, ^consumed::little-16>> ->
-          {:ok, %{total_entries: total_entries, cd_size: cd_size, cd_offset: cd_offset},
-           FileBuffer.move_by(file_buffer, @eocd_header_size)}
+          {:ok, buffer} = FileBuffer.move_backward_by(file_buffer, @eocd_header_size)
+          {:ok, %{total_entries: total_entries, cd_size: cd_size, cd_offset: cd_offset}, buffer}
 
         chunk when byte_size(chunk) < @eocd_header_size ->
           {:error, "Invalid zip file, missing EOCD record"}
 
         _ ->
-          find_eocd(FileBuffer.move_by(file_buffer, 1), consumed + 1)
+          {:ok, buffer} = FileBuffer.move_backward_by(file_buffer, 1)
+          find_eocd(buffer, consumed + 1)
       end
     end
   end
