@@ -4,7 +4,7 @@ Module to get files out of a zip. Works with local and remote files. Supports Zi
 
 ## Overview
 
-Unzip tries to solve problem of accessing files from a zip which is not local (Aws S3, sftp etc). It does this by simply separating file system and zip implementation. Anything which implements `Unzip.FileAccess` can be used to get zip contents. Unzip relies on the ability to seek and read of the file, This is due to the nature of zip file.  Files from the zip are read on demand.
+Unzip tries to solve problem of accessing files from a zip which is not local (Aws S3, sftp etc). It does this by simply separating file system and zip implementation. Any struct can implement `Unzip.FileAccess` protocol, then use `Unzip` to read zip . Unzip relies on seek-and-read ability of the file system, this is due to the specification of the zip. Unzip does not read whole file; it reads zip file on demand. For example, if a zip file has 100 files and we only want one file, Unzip reads only that file.
 
 ## Installation
 
