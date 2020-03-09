@@ -118,6 +118,23 @@ defmodule UnzipTest do
     end
   end
 
+  describe "handling zip bomb" do
+    test "full overlapping range" do
+      {:error, "Invalid zip file, found overlapping zip entries"} =
+        Unzip.new(local_zip("full_overlap.zip"))
+    end
+
+    test "quoted overlapping range" do
+      {:error, "Invalid zip file, found overlapping zip entries"} =
+        Unzip.new(local_zip("quoted_overlap.zip"))
+    end
+
+    test "zip bomb zip64" do
+      {:error, "Invalid zip file, found overlapping zip entries"} =
+        Unzip.new(local_zip("quoted_overlap.zip"))
+    end
+  end
+
   defp local_zip(file_name) do
     Unzip.LocalFile.open(Path.join(@fixture_path, file_name))
   end
