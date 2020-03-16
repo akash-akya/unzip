@@ -26,6 +26,7 @@ defmodule Unzip do
   require Logger
   alias Unzip.FileAccess
   alias Unzip.FileBuffer
+  alias Unzip.RangeTree
   use Bitwise, only_operators: true
 
   @chunk_size 65_000
@@ -161,14 +162,15 @@ defmodule Unzip do
              eocd.cd_offset,
              :forward
            ) do
-      parse_cd(file_buffer, %{})
+      parse_cd(file_buffer, %{entries: %{}, range_tree: RangeTree.new()})
     end
   end
 
-  defp parse_cd(%FileBuffer{buffer_position: pos, limit: limit}, result) when pos >= limit,
-    do: {:ok, result}
+  defp parse_cd(%FileBuffer{buffer_position: pos, limit: limit}, %{entries: entries})
+       when pos >= limit,
+       do: {:ok, entries}
 
-  defp parse_cd(buffer, result) do
+  defp parse_cd(buffer, acc) do
     with {:ok, chunk, buffer} <- FileBuffer.next_chunk(buffer, 46),
          <<0x02014B50::little-32, _::little-32, flag::little-16, compression_method::little-16,
            mtime::little-16, mdate::little-16, crc::little-32, compressed_size::little-32,
@@ -194,15 +196,32 @@ defmodule Unzip do
         file_name: file_name
       }
 
-      if need_zip64_extra?(entry) do
-        parse_cd(buffer, Map.put(result, file_name, merge_zip64_extra(entry, extra_fields)))
-      else
-        parse_cd(buffer, Map.put(result, file_name, entry))
+      entry =
+        if need_zip64_extra?(entry) do
+          merge_zip64_extra(entry, extra_fields)
+        else
+          entry
+        end
+
+      case add_entry(acc, file_name, entry) do
+        {:error, _} = error -> error
+        acc -> parse_cd(buffer, acc)
       end
     end
   else
     {:error, :invalid_count} -> {:error, "Invalid zip file, invalid central directory"}
     error -> error
+  end
+
+  defp add_entry(%{entries: entries, range_tree: range_tree}, file_name, entry) do
+    if RangeTree.overlap?(range_tree, entry.local_header_offset, entry.compressed_size) do
+      {:error, "Invalid zip file, found overlapping zip entries"}
+    else
+      %{
+        entries: Map.put(entries, file_name, entry),
+        range_tree: RangeTree.insert(range_tree, entry.local_header_offset, entry.compressed_size)
+      }
+    end
   end
 
   defp need_zip64_extra?(%{
