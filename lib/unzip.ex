@@ -125,11 +125,24 @@ defmodule Unzip do
       fn ->
         z = :zlib.open()
         :ok = :zlib.inflateInit(z, -15)
-        z
+        :zlib.setBufSize(z, 512 * 1024)
+        {z, true}
       end,
-      fn data, z -> {[:zlib.inflate(z, data)], z} end,
-      fn z ->
-        :zlib.inflateEnd(z)
+      fn data, {z, flag} ->
+        case flag do
+          true ->
+            uncompressed1 = case :zlib.inflateChunk(z, data) do
+              {_, uncompressed} -> uncompressed;
+              uncompressed -> uncompressed
+            end
+            {[uncompressed1], {z, false}};
+          false ->
+            uncompressed = :zlib.inflateChunk(z)
+            {[uncompressed], {z, false}}
+        end
+      end,
+      fn {z, _flag} ->
+        :zlib.inflateReset(z)
         :zlib.close(z)
       end
     )
