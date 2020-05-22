@@ -142,7 +142,7 @@ defmodule Unzip do
         end
       end,
       fn {z, _flag} ->
-        :zlib.inflateReset(z)
+        :zlib.inflateEnd(z)
         :zlib.close(z)
       end
     )
