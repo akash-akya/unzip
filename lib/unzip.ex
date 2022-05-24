@@ -207,10 +207,10 @@ defmodule Unzip do
         {:error, _} = error -> error
         acc -> parse_cd(buffer, acc)
       end
+    else
+      {:error, :invalid_count} -> {:error, "Invalid zip file, invalid central directory"}
+      error -> error
     end
-  else
-    {:error, :invalid_count} -> {:error, "Invalid zip file, invalid central directory"}
-    error -> error
   end
 
   defp add_entry(%{entries: entries, range_tree: range_tree}, file_name, entry) do
