@@ -1,10 +1,13 @@
 defmodule Unzip.MixProject do
   use Mix.Project
 
+  @version "0.6.0"
+  @scm_url "https://github.com/akash-akya/unzip"
+
   def project do
     [
       app: :unzip,
-      version: "0.6.0",
+      version: @version,
       elixir: "~> 1.5",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -14,10 +17,11 @@ defmodule Unzip.MixProject do
       description: description(),
 
       # Docs
-      source_url: "https://github.com/akash-akya/unzip",
-      homepage_url: "https://github.com/akash-akya/unzip",
+      source_url: @scm_url,
+      homepage_url: @scm_url,
       docs: [
         main: "readme",
+        source_ref: "v#{@version}",
         extras: ["README.md"]
       ]
     ]
@@ -34,7 +38,7 @@ defmodule Unzip.MixProject do
   end
 
   defp description do
-    "Module to get files out of a zip. Works with local and remote files. Supports Zip64"
+    "Elixir library to stream zip file contents. Works with remote files. Supports Zip64"
   end
 
   defp package do
