@@ -1,10 +1,14 @@
-# Unzip [![Hex.pm](https://img.shields.io/hexpm/v/unzip.svg)](https://hex.pm/packages/unzip)
+# Unzip
 
-Module to get files out of a zip. Works with local and remote files. Supports Zip64.
+[![CI](https://github.com/akash-akya/unzip/actions/workflows/ci.yml/badge.svg)](https://github.com/akash-akya/unzip/actions/workflows/ci.yml)
+[![Hex.pm](https://img.shields.io/hexpm/v/unzip.svg)](https://hex.pm/packages/unzip)
+[![docs](https://img.shields.io/badge/docs-hexpm-blue.svg)](https://hexdocs.pm/unzip/)
+
+Elixir library to stream zip file contents. Works with remote files. Supports Zip64.
 
 ## Overview
 
-Unzip tries to solve problem of accessing files from a zip which is not local (Aws S3, sftp etc). It does this by simply separating file system and zip implementation. Any struct can implement `Unzip.FileAccess` protocol, then use `Unzip` to read zip . Unzip relies on seek-and-read ability of the file system, this is due to the specification of the zip. Unzip does not read whole file; it reads zip file on demand. For example, if a zip file has 100 files and we only want one file, Unzip reads only that file.
+Unzip tries to solve problem of accessing files from a zip which stored in a remote storage medium (Aws S3, SFTP server etc). It separates storage medium from zip implementation. Unzip can stream zip contents from any storage which implements `Unzip.FileAccess` protocol. You can selectively stream files from zip without reading complete zip, because of this we can saves bandwidth and time when you only need few files from a large zip. For example, if a zip file contains 100 files and we only want one specific file then Unzip read only that file.
 
 ## Installation
 
@@ -34,11 +38,9 @@ stream = Unzip.file_stream!(unzip, "baz.png")
 
 Supports STORED and DEFLATE compression methods. Supports zip64 specification.
 
-## Implementing `Unzip.FileAccess` protocol
+## Examples of implementing `Unzip.FileAccess` protocol
 
-### S3 File
-
-Using [ExAws](https://hexdocs.pm/ex_aws/ExAws.html)
+For Aws S3 using [ExAws](https://hexdocs.pm/ex_aws/ExAws.html)
 
 ```elixir
 defmodule Unzip.S3File do
@@ -95,7 +97,7 @@ Unzip.file_stream!(unzip, "cats/kitty.png")
 
 ```
 
-### SFTP File
+For zip file in SFTP server
 
 ```elixir
 defmodule Unzip.SftpFile do
