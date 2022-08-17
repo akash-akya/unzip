@@ -27,7 +27,6 @@ defmodule Unzip do
   alias Unzip.FileAccess
   alias Unzip.FileBuffer
   alias Unzip.RangeTree
-  use Bitwise, only_operators: true
 
   @chunk_size 65_000
 
