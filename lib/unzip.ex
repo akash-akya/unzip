@@ -30,6 +30,11 @@ defmodule Unzip do
 
   @chunk_size 65_000
 
+  @type t :: %__MODULE__{
+          cd_list: %{optional(String.t()) => map()},
+          zip: struct()
+        }
+
   defstruct [:zip, :cd_list]
 
   defmodule Error do
