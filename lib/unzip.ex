@@ -3,7 +3,13 @@ defmodule Unzip do
   Module to get files out of a zip. Works with local and remote files
 
   ## Overview
-  Unzip tries to solve problem of accessing files from a zip which is not local (Aws S3, sftp etc). It does this by simply separating file system and zip implementation. Anything which implements `Unzip.FileAccess` can be used to get zip contents. Unzip relies on the ability to seek and read of the file, This is due to the nature of zip file.  Files from the zip are read on demand.
+
+  Unzip tries to solve problem of accessing files from a zip which is
+  not local (Aws S3, sftp etc). It does this by simply separating file
+  system and zip implementation. Anything which implements
+  `Unzip.FileAccess` can be used to get zip contents. Unzip relies on
+  the ability to seek and read of the file, This is due to the nature
+  of zip file.  Files from the zip are read on demand.
 
   ## Usage
 
@@ -30,9 +36,19 @@ defmodule Unzip do
 
   @chunk_size 65_000
 
+  @typedoc """
+  Struct holding zip related metadata, returned by the `new/1`.
+
+  Public fields:
+
+  * `zip` - Zip struct passed to `new/1`
+
+  Remaining fields are private and must not be accessed directly.
+  """
+
   @type t :: %__MODULE__{
-          cd_list: %{optional(String.t()) => map()},
-          zip: struct()
+          zip: struct(),
+          cd_list: map()
         }
 
   defstruct [:zip, :cd_list]
@@ -54,6 +70,14 @@ defmodule Unzip do
       * `:uncompressed_size` - (positive integer) Uncompressed file size in bytes
 
     """
+
+    @type t :: %__MODULE__{
+            file_name: String.t(),
+            last_modified_datetime: NaiveDateTime.t(),
+            compressed_size: pos_integer(),
+            uncompressed_size: pos_integer()
+          }
+
     defstruct [
       :file_name,
       :last_modified_datetime,
@@ -63,8 +87,17 @@ defmodule Unzip do
   end
 
   @doc """
-  Creates Unzip struct by reading central directory found at the end of the zip (reads entries in the file)
+  Reads zip metadata from the passed zip file.
+
+  `zip` must implement `Unzip.FileAccess` protocol.
+
+  Fetches the list of files present in the zip and other metadata by
+  reading central directory found at the end of the zip.
+
+  Returns `Unzip` struct which contains passed `zip` struct and zip
+  metadata.
   """
+  @spec new(Unzip.FileAccess.t()) :: {:ok, t} | {:error, term()}
   def new(zip) do
     with {:ok, eocd} <- find_eocd(zip),
          {:ok, entries} <- read_cd_entries(zip, eocd) do
@@ -77,6 +110,7 @@ defmodule Unzip do
 
   See `Unzip.Entry` for metadata fields
   """
+  @spec list_entries(t) :: list(Entry.t())
   def list_entries(unzip) do
     Enum.map(unzip.cd_list, fn {_, entry} ->
       %Entry{
@@ -91,6 +125,7 @@ defmodule Unzip do
   @doc """
   Returns decompressed file entry from the zip as a stream. `file_name` *must* be complete file path. File is read in the chunks of 65k
   """
+  @spec file_stream!(t, String.t()) :: Enumerable.t()
   def file_stream!(%Unzip{zip: zip, cd_list: cd_list}, file_name) do
     unless Map.has_key?(cd_list, file_name) do
       raise Error, message: "File #{inspect(file_name)} not present in the zip"
