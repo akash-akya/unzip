@@ -34,7 +34,10 @@ defmodule Unzip.MixProject do
   end
 
   defp deps do
-    [{:ex_doc, ">= 0.0.0", only: :dev}]
+    [
+      {:ex_doc, ">= 0.0.0", only: :dev},
+      {:credo, "~> 1.6", only: [:dev, :test], runtime: false}
+    ]
   end
 
   defp description do

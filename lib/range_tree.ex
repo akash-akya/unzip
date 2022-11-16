@@ -2,7 +2,7 @@ defmodule Unzip.RangeTree do
   @moduledoc false
   # Simple binary search tree implementaion using gb_trees.
 
-  def new(), do: :gb_trees.empty()
+  def new, do: :gb_trees.empty()
 
   def insert(t, offset, length), do: :gb_trees.insert(offset, length, t)
 
