@@ -4,7 +4,7 @@ on:
   - pull_request
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     name: Linux OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
     strategy:
       matrix:

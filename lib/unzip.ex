@@ -63,7 +63,7 @@ defmodule Unzip do
 
       * `:file_name` - (string) File name with complete path. Directory files will have `/` at the end of their name
 
-      * `:last_modified_datetime` - (NaiveDateTime) last modified date and time of the file
+      * `:last_modified_datetime` - (NaiveDateTime) last modified date and time of the file. It will be set to `nil` if datetime is invalid
 
       * `:compressed_size` - (positive integer) Compressed file size in bytes
 
@@ -73,7 +73,7 @@ defmodule Unzip do
 
     @type t :: %__MODULE__{
             file_name: String.t(),
-            last_modified_datetime: NaiveDateTime.t(),
+            last_modified_datetime: NaiveDateTime.t() | nil,
             compressed_size: pos_integer(),
             uncompressed_size: pos_integer()
           }
@@ -378,16 +378,12 @@ defmodule Unzip do
     end
   end
 
-  defp to_datetime(<<year::7, month::4, day::5>> = date, <<hour::5, minute::6, second::5>> = time) do
+  defp to_datetime(<<year::7, month::4, day::5>>, <<hour::5, minute::6, second::5>>) do
     case NaiveDateTime.new(1980 + year, month, day, hour, minute, second * 2) do
       {:ok, datetime} ->
         datetime
 
       _ ->
-        Logger.warn(
-          "[unzip] invalid datetime. date: #{inspect_binary(date)} time: #{inspect_binary(time)}"
-        )
-
         nil
     end
   end
@@ -412,6 +408,4 @@ defmodule Unzip do
         {:error, "Invalid data returned by pread/3. Expected binary"}
     end
   end
-
-  defp inspect_binary(binary), do: inspect(binary, binaries: :as_binaries, base: :hex)
 end
