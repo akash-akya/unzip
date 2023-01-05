@@ -1,7 +1,7 @@
 defmodule Unzip.MixProject do
   use Mix.Project
 
-  @version "0.7.2"
+  @version "0.8.0"
   @scm_url "https://github.com/akash-akya/unzip"
 
   def project do
