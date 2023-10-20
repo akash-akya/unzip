@@ -8,7 +8,7 @@ Elixir library to stream zip file contents. Works with remote files. Supports Zi
 
 ## Overview
 
-Unzip tries to solve problem of accessing files from a zip which stored in a remote storage medium (Aws S3, SFTP server etc). It separates storage medium from zip implementation. Unzip can stream zip contents from any storage which implements `Unzip.FileAccess` protocol. You can selectively stream files from zip without reading complete zip, because of this we can saves bandwidth and time when you only need few files from a large zip. For example, if a zip file contains 100 files and we only want one specific file then Unzip read only that file.
+Unzip tries to solve problem of unzipping files from different types of storage (Aws S3, SFTP server, in-memory etc). It separates type of storage from zip implementation. Unzip can stream zip contents from any type of storage which implements `Unzip.FileAccess` protocol. You can selectively stream files from zip without reading the complete zip. This saves bandwidth and decompression time if you only need few files from the zip. For example, if a zip file contains 100 files and we only want one file then `Unzip` access only that particular file
 
 ## Installation
 
@@ -29,6 +29,11 @@ zip_file = Unzip.LocalFile.open("foo/bar.zip")
 # `new` reads list of files by reading central directory found at the end of the zip
 {:ok, unzip} = Unzip.new(zip_file)
 
+# Alternatively if you have the zip file in memory as binary you can
+# directly pass it to `Unzip.new(binary)` to unzip
+#
+# {:ok, unzip} = Unzip.new(<<binary>>)
+
 # presents already read files metadata
 file_entries = Unzip.list_entries(unzip)
 
@@ -38,7 +43,7 @@ stream = Unzip.file_stream!(unzip, "baz.png")
 
 Supports STORED and DEFLATE compression methods. Supports zip64 specification.
 
-## Examples of implementing `Unzip.FileAccess` protocol
+## Sample implementations of `Unzip.FileAccess` protocol
 
 For Aws S3 using [ExAws](https://hexdocs.pm/ex_aws/ExAws.html)
 

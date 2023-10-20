@@ -12,7 +12,7 @@ defprotocol Unzip.FileAccess do
 
   It should return `{:ok, binary}` where binary is the chunk found at `offset` with length `length`
   """
-  @spec pread(t, pos_integer, pos_integer) :: {:ok, chunk} | {:error, reason}
+  @spec pread(t, non_neg_integer, pos_integer) :: {:ok, chunk} | {:error, reason}
   def pread(file, offset, length)
 
   @doc """

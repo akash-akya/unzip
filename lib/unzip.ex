@@ -19,7 +19,12 @@ defmodule Unzip do
       # `new` reads list of files by reading central directory found at the end of the zip
       {:ok, unzip} = Unzip.new(zip_file)
 
-      # presents already read files metadata
+      # Alternatively if you have the zip file in memory as binary you can
+      # directly pass it to `Unzip.new(binary)` to unzip
+      #
+      # {:ok, unzip} = Unzip.new(<<binary>>)
+
+      # returns list of files along with metadata
       file_entries = Unzip.list_entries(unzip)
 
       # returns decompressed file stream
