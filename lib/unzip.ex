@@ -127,11 +127,14 @@ defmodule Unzip do
     end)
   end
 
+  @type stream_options :: {:chunk_size, Integer.t()}
+
   @doc """
-  Returns decompressed file entry from the zip as a stream. `file_name` *must* be complete file path. File is read in the chunks of 65k
+  Returns decompressed file entry from the zip as a stream. `file_name` *must* be complete file path. File is read in the chunks of 65k unless other size is specified.
   """
   @spec file_stream!(t, String.t()) :: Enumerable.t()
-  def file_stream!(%Unzip{zip: zip, cd_list: cd_list}, file_name) do
+  @spec file_stream!(t, String.t(), [stream_options]) :: Enumerable.t()
+  def file_stream!(%Unzip{zip: zip, cd_list: cd_list}, file_name, opts \\ []) do
     unless Map.has_key?(cd_list, file_name) do
       raise Error, message: "File #{inspect(file_name)} not present in the zip"
     end
@@ -144,12 +147,12 @@ defmodule Unzip do
 
     offset = entry.local_header_offset + 30 + file_name_length + extra_field_length
 
-    stream!(zip, offset, entry.compressed_size)
+    stream!(zip, offset, entry.compressed_size, opts)
     |> decompress(compression_method)
     |> crc_check(entry.crc)
   end
 
-  defp stream!(file, offset, size) do
+  defp stream!(file, offset, size, opts) do
     end_offset = offset + size
 
     Stream.unfold(offset, fn
@@ -157,7 +160,8 @@ defmodule Unzip do
         nil
 
       offset ->
-        next_offset = min(offset + @chunk_size, end_offset)
+        chunk_size = Keyword.get(opts, :chunk_size, @chunk_size)
+        next_offset = min(offset + chunk_size, end_offset)
         data = pread!(file, offset, next_offset - offset)
         {data, next_offset}
     end)
