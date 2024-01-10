@@ -75,6 +75,19 @@ defmodule UnzipTest do
     assert File.read!(Path.join(@fixture_path, "file-sample_1MB.doc")) == result
   end
 
+  test "stream! with chunk_size" do
+    {:ok, file} = Unzip.new(local_zip("stored.zip"))
+
+    chunks =
+      Unzip.file_stream!(file, "file-sample_1MB.doc", chunk_size: 100_000)
+      |> Enum.to_list()
+
+    assert IO.iodata_length(hd(chunks)) == 100_000
+
+    assert File.read!(Path.join(@fixture_path, "file-sample_1MB.doc")) ==
+             IO.iodata_to_binary(chunks)
+  end
+
   test "decompression for deflate" do
     {:ok, file} = Unzip.new(local_zip("deflate.zip"))
 

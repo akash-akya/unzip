@@ -130,22 +130,26 @@ defmodule Unzip do
   @type stream_options :: {:chunk_size, Integer.t()}
 
   @doc """
-  Returns decompressed file entry from the zip as a stream. `file_name` *must* be complete file path. File is read in the chunks of 65k unless other size is specified.
+  Returns decompressed file as a stream of stream of [iodata](https://hexdocs.pm/elixir/IO.html#module-io-data). `file_path` *must* be the complete file path within the zip. The file entry is read in the chunks and decompressed and a streaming fashion.
+
+  ### Options
+
+  * `chunk_size` - Chunks are read from the source of the size specified by `chunk_size`. This is *not* the size of the chunk returned by `file_stream!`. As the chunk size varies after decompressing the. Useful when reading binary from the source is expensive and you want reduce IO by increasing the chunk size. Defaults to `65_000`
   """
   @spec file_stream!(t, String.t()) :: Enumerable.t()
   @spec file_stream!(t, String.t(), [stream_options]) :: Enumerable.t()
-  def file_stream!(%Unzip{zip: zip, cd_list: cd_list}, file_name, opts \\ []) do
-    unless Map.has_key?(cd_list, file_name) do
-      raise Error, message: "File #{inspect(file_name)} not present in the zip"
+  def file_stream!(%Unzip{zip: zip, cd_list: cd_list}, file_path, opts \\ []) do
+    unless Map.has_key?(cd_list, file_path) do
+      raise Error, message: "File #{inspect(file_path)} not present in the zip"
     end
 
-    entry = Map.fetch!(cd_list, file_name)
+    entry = Map.fetch!(cd_list, file_path)
     local_header = pread!(zip, entry.local_header_offset, 30)
 
     <<0x04034B50::little-32, _::little-32, compression_method::little-16, _::little-128,
-      file_name_length::little-16, extra_field_length::little-16>> = local_header
+      file_path_length::little-16, extra_field_length::little-16>> = local_header
 
-    offset = entry.local_header_offset + 30 + file_name_length + extra_field_length
+    offset = entry.local_header_offset + 30 + file_path_length + extra_field_length
 
     stream!(zip, offset, entry.compressed_size, opts)
     |> decompress(compression_method)
