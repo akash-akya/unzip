@@ -130,11 +130,11 @@ defmodule Unzip do
   @type stream_options :: {:chunk_size, pos_integer()}
 
   @doc """
-  Returns decompressed file as a stream of stream of [iodata](https://hexdocs.pm/elixir/IO.html#module-io-data). `file_path` *must* be the complete file path within the zip. The file entry is read in the chunks and decompressed and a streaming fashion.
+  Returns decompressed file as a stream of stream of [iodata](https://hexdocs.pm/elixir/IO.html#module-io-data). `file_path` *must* be the complete file path within the zip. The file entry is read in chunks, then decompressed in a streaming fashion.
 
   ### Options
 
-  * `chunk_size` - Chunks are read from the source of the size specified by `chunk_size`. This is *not* the size of the chunk returned by `file_stream!`. As the chunk size varies after decompressing the. Useful when reading binary from the source is expensive and you want reduce IO by increasing the chunk size. Defaults to `65_000`
+  * `chunk_size` - Chunks are read from the source of the size specified by `chunk_size`. This is *not* the size of the chunk returned by `file_stream!` since the chunk size varies after decompressing the. Useful when reading from the source is expensive and you want optimize by increasing the chunk size. Defaults to `65_000`
   """
   @spec file_stream!(t, String.t()) :: Enumerable.t()
   @spec file_stream!(t, String.t(), [stream_options]) :: Enumerable.t()
