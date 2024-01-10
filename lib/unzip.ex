@@ -127,7 +127,7 @@ defmodule Unzip do
     end)
   end
 
-  @type stream_options :: {:chunk_size, Integer.t()}
+  @type stream_options :: {:chunk_size, pos_integer()}
 
   @doc """
   Returns decompressed file as a stream of stream of [iodata](https://hexdocs.pm/elixir/IO.html#module-io-data). `file_path` *must* be the complete file path within the zip. The file entry is read in the chunks and decompressed and a streaming fashion.
