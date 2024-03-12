@@ -19,6 +19,8 @@ jobs:
             otp: 25.x
           - elixir: 1.15.x
             otp: 26.x
+          - elixir: 1.16.x
+            otp: 26.x
     steps:
       - uses: erlef/setup-beam@v1
         with:
@@ -28,7 +30,7 @@ jobs:
       - run: mix deps.get
       - run: mix deps.unlock --check-unused
       - run: mix format --check-formatted
-        if: startsWith(matrix.elixir, '1.15')
+        if: startsWith(matrix.elixir, '1.16')
       - run: mix compile --force --warnings-as-errors
       - run: mix credo --strict
       - run: mix test --trace
