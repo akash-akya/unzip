@@ -3,6 +3,11 @@ defmodule UnzipTest do
 
   @fixture_path Path.join(__DIR__, "support/")
 
+  test "zip with invalid central directory file header" do
+    <<_ignore::8, zip::binary>> = File.read!(Path.join(@fixture_path, "abc.zip"))
+    assert {:error, "Invalid zip file, invalid central directory file header"} = Unzip.new(zip)
+  end
+
   test "zip with invalid central directory" do
     assert {:error, "Invalid zip file, invalid central directory"} =
              Unzip.new(local_zip("bad_central_directory.zip"))
