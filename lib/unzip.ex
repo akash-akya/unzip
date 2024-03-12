@@ -146,14 +146,18 @@ defmodule Unzip do
     entry = Map.fetch!(cd_list, file_path)
     local_header = pread!(zip, entry.local_header_offset, 30)
 
-    <<0x04034B50::little-32, _::little-32, compression_method::little-16, _::little-128,
-      file_path_length::little-16, extra_field_length::little-16>> = local_header
+    case local_header do
+      <<0x04034B50::little-32, _::little-32, compression_method::little-16, _::little-128,
+        file_path_length::little-16, extra_field_length::little-16>> ->
+        offset = entry.local_header_offset + 30 + file_path_length + extra_field_length
 
-    offset = entry.local_header_offset + 30 + file_path_length + extra_field_length
+        stream!(zip, offset, entry.compressed_size, opts)
+        |> decompress(compression_method)
+        |> crc_check(entry.crc)
 
-    stream!(zip, offset, entry.compressed_size, opts)
-    |> decompress(compression_method)
-    |> crc_check(entry.crc)
+      _ ->
+        raise Error, message: "Invalid local zip header"
+    end
   end
 
   defp stream!(file, offset, size, opts) do
@@ -189,8 +193,9 @@ defmodule Unzip do
 
   defp decompress(stream, 0x0), do: stream
 
-  defp decompress(_stream, compression_method),
-    do: raise(Error, message: "Compression method #{compression_method} is not supported")
+  defp decompress(_stream, compression_method) do
+    raise Error, message: "Compression method #{compression_method} is not supported"
+  end
 
   defp crc_check(stream, expected_crc) do
     stream
