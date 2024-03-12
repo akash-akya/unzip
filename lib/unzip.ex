@@ -146,14 +146,18 @@ defmodule Unzip do
     entry = Map.fetch!(cd_list, file_path)
     local_header = pread!(zip, entry.local_header_offset, 30)
 
-    <<0x04034B50::little-32, _::little-32, compression_method::little-16, _::little-128,
-      file_path_length::little-16, extra_field_length::little-16>> = local_header
+    case local_header do
+      <<0x04034B50::little-32, _::little-32, compression_method::little-16, _::little-128,
+        file_path_length::little-16, extra_field_length::little-16>> ->
+        offset = entry.local_header_offset + 30 + file_path_length + extra_field_length
 
-    offset = entry.local_header_offset + 30 + file_path_length + extra_field_length
+        stream!(zip, offset, entry.compressed_size, opts)
+        |> decompress(compression_method)
+        |> crc_check(entry.crc)
 
-    stream!(zip, offset, entry.compressed_size, opts)
-    |> decompress(compression_method)
-    |> crc_check(entry.crc)
+      _ ->
+        raise Error, message: "Invalid local zip header"
+    end
   end
 
   defp stream!(file, offset, size, opts) do
@@ -189,8 +193,9 @@ defmodule Unzip do
 
   defp decompress(stream, 0x0), do: stream
 
-  defp decompress(_stream, compression_method),
-    do: raise(Error, message: "Compression method #{compression_method} is not supported")
+  defp decompress(_stream, compression_method) do
+    raise Error, message: "Compression method #{compression_method} is not supported"
+  end
 
   defp crc_check(stream, expected_crc) do
     stream
@@ -224,11 +229,12 @@ defmodule Unzip do
 
   defp parse_cd(buffer, acc) do
     with {:ok, chunk, buffer} <- FileBuffer.next_chunk(buffer, 46),
-         <<0x02014B50::little-32, _::little-32, flag::little-16, compression_method::little-16,
-           mtime::little-16, mdate::little-16, crc::little-32, compressed_size::little-32,
-           uncompressed_size::little-32, file_name_length::little-16,
-           extra_field_length::little-16, comment_length::little-16, _::little-64,
-           local_header_offset::little-32>> <- chunk,
+         {:match_chunk,
+          <<0x02014B50::little-32, _::little-32, flag::little-16, compression_method::little-16,
+            mtime::little-16, mdate::little-16, crc::little-32, compressed_size::little-32,
+            uncompressed_size::little-32, file_name_length::little-16,
+            extra_field_length::little-16, comment_length::little-16, _::little-64,
+            local_header_offset::little-32>>} <- {:match_chunk, chunk},
          {:ok, buffer} <- FileBuffer.move_forward_by(buffer, 46),
          {:ok, file_name, buffer} <- FileBuffer.next_chunk(buffer, file_name_length),
          {:ok, buffer} <- FileBuffer.move_forward_by(buffer, file_name_length),
@@ -260,8 +266,14 @@ defmodule Unzip do
         acc -> parse_cd(buffer, acc)
       end
     else
-      {:error, :invalid_count} -> {:error, "Invalid zip file, invalid central directory"}
-      error -> error
+      {:error, :invalid_count} ->
+        {:error, "Invalid zip file, invalid central directory"}
+
+      {:match_chunk, _binary} ->
+        {:error, "Invalid zip file, invalid central directory file header"}
+
+      {:error, _error} = error ->
+        error
     end
   end
 
