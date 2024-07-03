@@ -175,17 +175,26 @@ defmodule Unzip do
     end)
   end
 
+  @end_of_stream :__end__
+
   defp decompress(stream, 0x8) do
     stream
+    |> Stream.concat([@end_of_stream])
     |> Stream.transform(
       fn ->
         z = :zlib.open()
         :ok = :zlib.inflateInit(z, -15)
         z
       end,
-      fn data, z -> {[:zlib.inflate(z, data)], z} end,
+      fn
+        @end_of_stream, z ->
+          :zlib.inflateEnd(z)
+          {[], z}
+
+        data, z ->
+          {[:zlib.inflate(z, data)], z}
+      end,
       fn z ->
-        :zlib.inflateEnd(z)
         :zlib.close(z)
       end
     )
@@ -199,15 +208,18 @@ defmodule Unzip do
 
   defp crc_check(stream, expected_crc) do
     stream
-    |> Stream.transform(
-      fn -> :erlang.crc32(<<>>) end,
-      fn data, crc -> {[data], :erlang.crc32(crc, data)} end,
-      fn crc ->
+    |> Stream.concat([@end_of_stream])
+    |> Stream.transform(:erlang.crc32(<<>>), fn
+      @end_of_stream, crc ->
         unless crc == expected_crc do
           raise Error, message: "CRC mismatch. expected: #{expected_crc} got: #{crc}"
         end
-      end
-    )
+
+        {[], :ok}
+
+      data, crc ->
+        {[data], :erlang.crc32(crc, data)}
+    end)
   end
 
   defp read_cd_entries(zip, eocd) do

@@ -104,6 +104,28 @@ defmodule UnzipTest do
     assert File.read!(Path.join(@fixture_path, "file-sample_1MB.doc")) == result
   end
 
+  test "premature termination of stream" do
+    {:ok, file} = Unzip.new(local_zip("deflate.zip"))
+
+    assert_raise RuntimeError, "some error", fn ->
+      file
+      |> Unzip.file_stream!("file-sample_1MB.doc")
+      |> Enum.each(fn _ ->
+        raise "some error"
+      end)
+    end
+  end
+
+  test "CRC mismatch" do
+    {:ok, file} = Unzip.new(local_zip("crc_mismatch.zip"))
+
+    assert_raise Unzip.Error, "CRC mismatch. expected: 2912544069 got: 2912478533", fn ->
+      file
+      |> Unzip.file_stream!("file.txt")
+      |> Stream.run()
+    end
+  end
+
   test "decompression for store" do
     {:ok, file} = Unzip.new(local_zip("stored.zip"))
 
