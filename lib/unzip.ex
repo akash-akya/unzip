@@ -30,6 +30,9 @@ defmodule Unzip do
       # returns decompressed file stream
       stream = Unzip.file_stream!(unzip, "baz.png")
 
+      # if you want to read the whole file as binary
+      #
+      # file_content = Enum.into(stream, <<>>, &IO.iodata_to_binary/1)
 
   Supports STORED and DEFLATE compression methods. Does not support zip64 specification yet
 
@@ -130,7 +133,7 @@ defmodule Unzip do
   @type stream_options :: {:chunk_size, pos_integer()}
 
   @doc """
-  Returns decompressed file as a stream of stream of [iodata](https://hexdocs.pm/elixir/IO.html#module-io-data). `file_path` *must* be the complete file path within the zip. The file entry is read in chunks, then decompressed in a streaming fashion.
+  Returns decompressed file as a stream of [iodata](https://hexdocs.pm/elixir/IO.html#module-io-data). `file_path` *must* be the complete file path within the zip. The file is read in chunks, decompressed concurrently in a streaming fashion.
 
   ### Options
 

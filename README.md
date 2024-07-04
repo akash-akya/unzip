@@ -34,11 +34,15 @@ zip_file = Unzip.LocalFile.open("foo/bar.zip")
 #
 # {:ok, unzip} = Unzip.new(<<binary>>)
 
-# presents already read files metadata
+# returns list of files along with metadata
 file_entries = Unzip.list_entries(unzip)
 
 # returns decompressed file stream
 stream = Unzip.file_stream!(unzip, "baz.png")
+
+# if you want to read the whole file as binary
+#
+# file_content = Enum.into(stream, <<>>, &IO.iodata_to_binary/1)
 ```
 
 Supports STORED and DEFLATE compression methods. Supports zip64 specification.
