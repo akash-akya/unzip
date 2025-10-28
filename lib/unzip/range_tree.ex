@@ -1,6 +1,6 @@
 defmodule Unzip.RangeTree do
   @moduledoc false
-  # Simple binary search tree implementaion using gb_trees.
+  # Simple binary search tree implementation using gb_trees.
 
   def new, do: :gb_trees.empty()
 

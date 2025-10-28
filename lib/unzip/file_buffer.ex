@@ -56,7 +56,7 @@ defmodule Unzip.FileBuffer do
     end
   end
 
-  def next_chunk(buffer, size) do
+  def next_chunk(%FileBuffer{} = buffer, size) do
     buffer_end_pos = buffer.buffer_position + byte_size(buffer.buffer)
     start_pos = max(0, buffer_end_pos - size)
 
@@ -84,7 +84,7 @@ defmodule Unzip.FileBuffer do
   def move_backward_by(%FileBuffer{buffer: buffer}, count) when byte_size(buffer) < count,
     do: {:error, :invalid_count}
 
-  def move_backward_by(buffer, count) do
+  def move_backward_by(%FileBuffer{} = buffer, count) do
     {:ok,
      %FileBuffer{
        buffer
@@ -95,7 +95,7 @@ defmodule Unzip.FileBuffer do
   def move_forward_by(%FileBuffer{buffer: buffer}, count) when byte_size(buffer) < count,
     do: {:error, :invalid_count}
 
-  def move_forward_by(buffer, count) do
+  def move_forward_by(%FileBuffer{} = buffer, count) do
     {:ok,
      %FileBuffer{
        buffer

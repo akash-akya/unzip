@@ -378,8 +378,8 @@ defmodule Unzip do
 
       {:ok,
        <<0x06064B50::little-32, _::64, _::16, _::16, _::32, _::32, _::64,
-         total_entries::little-64, cd_size::little-64,
-         cd_offset::little-64>>} = pread(file_buffer.file, eocd_offset, @zip64_eocd_size)
+         total_entries::little-64, cd_size::little-64, cd_offset::little-64>>} =
+        pread(file_buffer.file, eocd_offset, @zip64_eocd_size)
 
       {:ok, %{total_entries: total_entries, cd_size: cd_size, cd_offset: cd_offset}}
     else
@@ -395,8 +395,8 @@ defmodule Unzip do
   # EOCD can anywhere in the zip file. To avoid exhaustive search, we
   # limit search space to last 5Mb. If we don't find EOCD within that
   # we assume it's an invalid zip
-  @eocd_seach_limit 5 * 1024 * 1024
-  defp find_eocd(_file_buffer, consumed) when consumed > @eocd_seach_limit,
+  @eocd_search_limit 5 * 1024 * 1024
+  defp find_eocd(_file_buffer, consumed) when consumed > @eocd_search_limit,
     do: {:error, "Invalid zip file, missing EOCD record"}
 
   @eocd_header_size 22
