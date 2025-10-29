@@ -4,21 +4,15 @@ on:
   - pull_request
 jobs:
   linux:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     name: Linux OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
     strategy:
       matrix:
         include:
-          - elixir: 1.12.x
-            otp: 23.x
-          - elixir: 1.14.x
-            otp: 24.x
-          - elixir: 1.15.x
-            otp: 25.x
-          - elixir: 1.15.x
-            otp: 26.x
-          - elixir: 1.16.x
-            otp: 26.x
+          - elixir: 1.18.x
+            otp: 27.x
+          - elixir: 1.19.x
+            otp: 28.x
     steps:
       - uses: erlef/setup-beam@v1
         with:
@@ -28,7 +22,7 @@ jobs:
       - run: mix deps.get
       - run: mix deps.unlock --check-unused
       - run: mix format --check-formatted
-        if: startsWith(matrix.elixir, '1.16')
+        if: startsWith(matrix.elixir, '1.19')
       - run: mix compile --force --warnings-as-errors
       - run: mix credo --strict
       - run: mix test --trace
