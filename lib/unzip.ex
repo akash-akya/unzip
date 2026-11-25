@@ -37,7 +37,6 @@ defmodule Unzip do
   Supports STORED and DEFLATE compression methods. Does not support zip64 specification yet
 
   """
-  require Logger
   alias Unzip.FileAccess
   alias Unzip.FileBuffer
   alias Unzip.RangeTree
